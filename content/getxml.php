@@ -51,7 +51,8 @@ foreach ($names	as $name => $value)
 		$result = mysql_queryf("SELECT fail,error,total,results,ip,useragent FROM run_client INNER JOIN clients ON run_client.client_id = clients.id WHERE useragent_id=$userAgentId AND run_id=$runId");
 		while ( $runAtClient= mysql_fetch_array($result) ) 
 		{
-			$clientName = $runAtClient['ip']." with ".$runAtClient['useragent'];
+			preg_match('/\(.*\)/', $runAtClient['useragent'], $matches);
+			$clientName = $runAtClient['ip']." ".$matches[0];
 
 			$badTests = $runAtClient['error'] + $runAtClient['fail'];
 			for($i = 0; $i < $runAtClient['total']; ++$i)
