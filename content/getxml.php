@@ -54,6 +54,9 @@ foreach ($names	as $name => $value)
 			preg_match('/\(.*\)/', $runAtClient['useragent'], $matches);
 			$clientName = $runAtClient['ip']." ".$matches[0];
 
+                        // create dummy testcases because some CI server like hudson count 
+                        // the testcases instead of take the "tests", "errors" and 
+                        // "failure" attribute
 			$badTests = $runAtClient['error'] + $runAtClient['fail'];
 			for($i = 0; $i < $runAtClient['total']; ++$i)
 			{
