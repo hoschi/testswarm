@@ -1,5 +1,4 @@
 <?php
-$currentDate = date('Y-m-d_H:i:s');
 $testrunner = 'doh';
 $jobId = preg_replace("/[^0-9]/", "", $_REQUEST['job_id']);
 if ($_REQUEST['packagename'] != "")
@@ -97,7 +96,7 @@ foreach ($names	as $name => $value)
 		
 		if ( $_REQUEST['output'] == "file" )
 		{
-			$fileName = "$outputDir/$packageName-job$jobId-${userAgentName}_$currentDate.xml";
+			$fileName = "$outputDir/${userAgentName}.xml";
 			$fileName = preg_replace('/\s+/', '_', $fileName);
 			$xml->asXML($fileName);
 			echo " and file writen to ".$fileName;
