@@ -1,0 +1,223 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+# USAGE
+# - install your testswarm described in ../README
+# - add user with the webinterface
+# - copy auth token from user DB entry in this script
+# - change all config parameters to fit your CI environment
+# - call the script with your prefered build tool
+#
+# Tip:
+# Your swarm url and the testsuite url must be the same domain. If not, the
+# tests will time out in the testswarm client browser.
+
+# CONFIGURE
+
+# The location of the TestSwarm that you're going to run against.
+
+my $SWARM = "http://192.168.0.52:8084";
+my $SWARM_INJECT = "/js/inject.js";
+
+# The type of revision control system being used.
+# Currently "svn" or "git" are supported.
+
+my $RCS_TYPE = "git";
+
+# Your TestSwarm username.
+
+my $USER = "test";
+
+# Your authorization token.
+
+my $AUTH_TOKEN = "";
+
+# The maximum number of times you want the tests to be run.
+
+my $MAX_RUNS = 1;
+
+my $BASE_DIR = ".";
+
+# A script tag loading in the TestSwarm injection script will
+# be added at the bottom of the <head> in the following file.
+
+my $INJECT_FILE = "web/js/util/doh/runner.html";
+
+# Any build commands that need to happen.
+
+my $BUILD = "";
+
+# The name of the job that will be submitted
+# (pick a descriptive, but short, name to make it easy to search)
+
+# Note: The string {REV} will be replaced with the current
+#       commit number/hash.
+
+my $JOB_NAME = "doitfaster #{REV}";
+
+# The name of the output dir for testresults
+my $OUT_DIR = "../build/reports/jsunit";
+
+# The name of the package name for the testsuite
+my $PACKAGE_NAME = "doitfaster";
+
+# The browsers you wish to run against. Options include:
+#  - "all" all available browsers.
+#  - "popular" the most popular browser (99%+ of all browsers in use)
+#  - "current" the current release of all the major browsers
+#  - "gbs" the browsers currently supported in Yahoo's Graded Browser Support
+#  - "beta" upcoming alpha/beta of popular browsers
+#  - "popularbeta" the most popular browser and their upcoming releases
+
+my $BROWSERS = "popularbeta";
+
+# All the suites that you wish to run within this job
+# (can be any number of suites)
+
+my %SUITES = ();
+
+# Comment these out if you wish to define a custom set of SUITES above
+# IMPORTANT!!!!!! change url here !!!!!!!
+# this url points to the url wiche hosts the project dir in the CI folder
+my $SUITE = "http://192.168.0.52:8091/web/js/util/doh/runner.html?registerModulePath=dif,../../../test/jsunit/dif&testModule=";
+sub BUILD_SUITES {
+	my $modules = `cat test/jsunit/dif/module.js`;
+	%SUITES = map { /(.*)Test/; $1 => "$SUITE$_"; } ($modules =~ /"(.*?Test)"/g);
+}
+
+########### NO NEED TO CONFIGURE BELOW HERE ############
+use Cwd 'abs_path';
+
+my $DEBUG = 1;
+my $curdate = time;
+
+my $rev;
+
+# Figure out the revision of the checkout
+if ( $RCS_TYPE eq "svn" ) {
+	print "svn info | grep Revision\n" if ( $DEBUG );
+	$rev = `svn info | grep Revision`;
+	$rev =~ s/Revision: //;
+} elsif ( $RCS_TYPE eq "git" ) {
+    my $cmd = "git rev-parse --short HEAD";
+    print "$cmd\n" if ( $DEBUG );
+    $rev = `$cmd`;
+}
+
+$rev =~ s/\s*//g;
+
+print "Revision: $rev\n" if ( $DEBUG );
+
+if ( ! $rev ) {
+	remove_tmp();
+	die "Revision information not found.";
+
+} elsif ( ! -e "../$rev" ) {
+	if ( $BUILD ) {
+		print "$BUILD\n" if ( $DEBUG );
+		`$BUILD`;
+	}
+
+	if ( exists &BUILD_SUITES ) {
+		&BUILD_SUITES();
+	}
+
+	foreach my $file ( glob($INJECT_FILE) ) {
+		my $inject_file = `cat $file`;
+
+		# Inject the TestSwarm injection script into the test suite
+		$inject_file =~ s/<\/head>/<script>document.write("<scr" + "ipt src='$SWARM$SWARM_INJECT?" + (new Date).getTime() + "'><\/scr" + "ipt>");<\/script><\/head>/;
+
+		open( my $fh, '>', $file ) or die "$file : $!";
+		print $fh $inject_file;
+		close( $fh );
+	}
+
+	my %props = (
+		"state" => "addjob",
+		"output" => "dump",
+		"user" => $USER,
+		"max" => $MAX_RUNS,
+		"job_name" => $JOB_NAME,
+		"browsers" => $BROWSERS,
+		"auth" => $AUTH_TOKEN
+	);
+
+	my $query = "";
+
+	foreach my $prop ( keys %props ) {
+		$query .= ($query ? "&" : "") . $prop . "=" . clean($props{$prop});
+	}
+
+	foreach my $suite ( sort keys %SUITES ) {
+		$query .= "&suites[]=" . clean($suite) .
+		          "&urls[]=" . clean($SUITES{$suite});
+	}
+
+	print "curl -d \"$query\" $SWARM\n" if ( $DEBUG );
+
+	my $results = `curl -d "$query" $SWARM`;
+
+	print "Results: $results\n" if ( $DEBUG );
+
+	my $jobnum = $results;
+	$jobnum =~ s/\D*//g;
+
+	print "Job number: $jobnum\n";
+
+	%props = (
+		"user" => $USER,
+		"auth" => $AUTH_TOKEN
+	);
+	$query = "";
+	foreach my $prop ( keys %props ) {
+		$query .= ($query ? "&" : "") . $prop . "=" . clean($props{$prop});
+	}
+
+	print "Waiting for testcompletion (max 30 min) ...\n";
+	print `date` if ( $DEBUG );
+	my $result = `curl -m 1800 -d \"$query\" $SWARM/polljob/$jobnum/\n`;
+	print "$result\n" if ( $DEBUG );
+	print `date` if ( $DEBUG );
+
+	$OUT_DIR = abs_path($OUT_DIR);
+	mkdir $OUT_DIR;
+	print "Dump results to tmp folder -> $OUT_DIR\n";
+	%props = (
+		"output" => "file",
+		"outputdir" => $OUT_DIR,
+		"packagename" => $PACKAGE_NAME
+	);
+	$query = "";
+	foreach my $prop ( keys %props ) {
+		$query .= ($query ? "&" : "") . $prop . "=" . clean($props{$prop});
+	}
+
+	my $connection = "curl -d \"$query\" $SWARM/getxml/$jobnum/"; 
+	print "$connection\n";
+	$result = `$connection\n`;
+	print "$result\n" if ( $DEBUG );
+	print "dir content:\n";
+	print `ls -l $OUT_DIR` if ( $DEBUG );
+
+	# reset injected file
+	if ( $RCS_TYPE eq "svn" ) {
+		foreach my $file ( glob($INJECT_FILE) ) {
+			`svn revert $file`;
+		}
+	} elsif ( $RCS_TYPE eq "git" ) {
+		foreach my $file ( glob($INJECT_FILE) ) {
+			`git checkout $file`;
+		}
+	}
+}
+
+sub clean {
+  my $str = shift;
+	$str =~ s/{REV}/$rev/g;
+	$str =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+	$str;
+}
+

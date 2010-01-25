@@ -1,9 +1,0 @@
-<?xml version="1.0"?>
-<project name="testswarmtest" default="build">
-	<target name="getxml">
-		<exec command="curl">
-			<arg line="-d 'output=file&amp;packagename=testswarm-o-mat' http://192.168.0.52:8084/getxml/2/" />
-		</exec>
-	</target>
-</project>
-
